@@ -38,6 +38,7 @@ protected:
 
 	rvClientEntityPtr<rvClientEffect>	guideEffect;
 	idList< idEntityPtr<idEntity> >		guideEnts;
+	idList< idEntityPtr<idEntity> >		statisProjs;
 	float								guideSpeedSlow;
 	float								guideSpeedFast;
 	float								guideRange;
@@ -174,7 +175,7 @@ void rvWeaponRocketLauncher::Think ( void ) {
 		return;
 	}
 						
-	// Cast a ray out to the lock range
+// Cast a ray out to the lock range
 // RAVEN BEGIN
 // ddynerman: multiple clip worlds
 	gameLocal.TracePoint(	owner, tr, 
@@ -213,15 +214,22 @@ rvWeaponRocketLauncher::OnLaunchProjectile
 void rvWeaponRocketLauncher::OnLaunchProjectile ( idProjectile* proj ) {
 	rvWeapon::OnLaunchProjectile(proj);
 
-	// Double check that its actually a guided projectile
-	if ( !proj || !proj->IsType ( idGuidedProjectile::GetClassType() ) ) {
+	//Checks if projectile is there
+	if (!proj) {
 		return;
 	}
-
+	
 	// Launch the projectile
 	idEntityPtr<idEntity> ptr;
 	ptr = proj;
-	guideEnts.Append ( ptr );	
+	statisProjs.Append(ptr);
+	gameLocal.Printf("mine Spawned \n");
+	// Double check that its actually a guided projectile
+	if (!proj->IsType(idGuidedProjectile::GetClassType())) {
+		return;
+	}
+	// Guidenced valt for compadibility
+	guideEnts.Append(ptr);
 }
 
 /*
@@ -377,10 +385,18 @@ stateResult_t rvWeaponRocketLauncher::State_Lower ( const stateParms_t& parms ) 
 	};	
 	switch ( parms.stage ) {
 		case STAGE_INIT:
+			for (int i = statisProjs.Num() - 1; i >= 0; i--) {
+				idProjectile* p = static_cast<idProjectile*>(statisProjs[i].GetEntity());
+				if (p != NULL) {
+					p->Explode(NULL, true);
+				}
+			}
+			statisProjs.Clear();
+
 			SetStatus ( WP_LOWERING );
 			PlayAnim ( ANIMCHANNEL_LEGS, "putaway", parms.blendFrames );
 			return SRESULT_STAGE(STAGE_WAIT);
-			
+
 		case STAGE_WAIT:
 			if ( AnimDone ( ANIMCHANNEL_LEGS, 0 ) ) {
 				SetStatus ( WP_HOLSTERED );
