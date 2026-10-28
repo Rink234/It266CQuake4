@@ -184,6 +184,8 @@ private:
 //Moded Boostermovement
 	void					StartBoost( void );
 	void					BoosterFly( float msec );
+	void					StartBoostv2(void);
+	void					BoosterFlyv2(float msec);
 //regular
 	void					MovePlayer( int msec );
 

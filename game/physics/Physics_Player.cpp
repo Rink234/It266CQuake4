@@ -47,14 +47,21 @@ const int PMF_TIME_WATERJUMP	= 128;		// movementTime is waterjump
 
 int c_pmove = 0;
 
-//Modded
+//Modded memory heresy that I will not optimize out of fear
+const int	PM_MOMENTUM_MS = 600;
+const float	PM_MOMENTUM_MINSPEED = 0.75f;
 const int PM_FLYTIME_MS = 7000;
 const int PMF_TIME_FLY = 256;	
-const int PMF_ALL_TIMES = (PMF_TIME_WATERJUMP | PMF_TIME_LAND | PMF_TIME_KNOCKBACK | PMF_TIME_FLY);
+const int PMF_TIME_SLIDE = 512;
+const int PMF_ALL_TIMES = (PMF_TIME_WATERJUMP | PMF_TIME_LAND | PMF_TIME_KNOCKBACK | PMF_TIME_FLY | PMF_TIME_SLIDE);
 float boostTimeRemaining;
+float boostTimeRemainingv2;
 bool boostActive;
+bool boostActivev2;
 idVec3 boostDirection;
+idVec3 boostDirectionv2;
 int boostActivationDelay;
+int boostActivationDelayv2;
 
 
 float idPhysics_Player::Pm_Accelerate( void ) {
@@ -496,8 +503,8 @@ void idPhysics_Player::Friction( void ) {
 			if ( !(current.movementFlags & PMF_TIME_KNOCKBACK) ) {
 				control = speed < PM_STOPSPEED ? PM_STOPSPEED : speed;
 // RAVEN BEGIN
-// bdube: crouch slide
-				if ( current.crouchSlideTime > 0 ) {
+// bdube: crouch :Rohin - Modded in slide on walking
+				if ( current.crouchSlideTime > 0 || (current.movementFlags & PMF_TIME_SLIDE))  {
 					drop += control * PM_SLIDEFRICTION * frametime;
 				} else {
 					drop += control * PM_FRICTION * frametime;
@@ -703,6 +710,8 @@ void idPhysics_Player::WalkMove( void ) {
 	float		accelerate;
 	idVec3		oldVelocity, vel;
 	float		oldVel, newVel;
+	idVec3 flatVel;
+	float flatSpeed;
 
 	if ( waterLevel > WATERLEVEL_WAIST && ( viewForward * groundTrace.c.normal ) > 0.0f ) {
 		// begin swimming
@@ -735,6 +744,19 @@ void idPhysics_Player::WalkMove( void ) {
 	wishdir = wishvel;
 	wishspeed = wishdir.Normalize();
 	wishspeed *= scale;
+	//modded physics 1 scenanigens
+	flatVel = current.velocity - (current.velocity * gravityNormal) * gravityNormal;
+	//remander vel
+	flatSpeed = flatVel.Length();
+
+	if (!current.movementTime && !(current.movementFlags & PMF_DUCKED)
+		&& flatSpeed > walkSpeed * PM_MOMENTUM_MINSPEED) {
+		bool stopped = (wishspeed <= 0.0f);
+		if (stopped) {
+			current.movementFlags |= PMF_TIME_SLIDE;
+			current.movementTime = PM_MOMENTUM_MS;
+		}
+	}
 
 	// clamp the speed lower if wading or walking on the bottom
 	if ( waterLevel ) {
@@ -757,8 +779,10 @@ void idPhysics_Player::WalkMove( void ) {
 
 	idPhysics_Player::Accelerate( wishdir, wishspeed, accelerate );
 
-	if ( ( groundMaterial && groundMaterial->GetSurfaceFlags() & SURF_SLICK ) || current.movementFlags & PMF_TIME_KNOCKBACK ) {
-		current.velocity += gravityVector * frametime;
+	//Rohin:Hyjackign the kb function to slide
+	if ( ( groundMaterial && groundMaterial->GetSurfaceFlags() & SURF_SLICK ) || current.movementFlags & PMF_TIME_KNOCKBACK || current.movementFlags & PMF_TIME_SLIDE) {
+		accelerate = Pm_AirAccelerate();
+		//current.velocity += gravityVector * frametime;
 	}
 
 	oldVelocity = current.velocity;
@@ -1449,7 +1473,8 @@ void idPhysics_Player::DropTimers( void ) {
 }
 
 void idPhysics_Player::StartBoost( void ) {
-	if ( boostActive != NULL && boostActive ) {
+	//boostActive != NULL &&
+	if ( boostActive ) {
 		return;
 	}
 	boostActive = true;
@@ -1529,6 +1554,42 @@ void idPhysics_Player::BoosterFly(float msec) {
 
 	//idPhysics_Player::SlideMove(false, false, false, false);
 }
+void idPhysics_Player::StartBoostv2(void) {
+	if (boostActivev2) {
+		return;
+	}
+
+	boostActivev2 = true;
+	boostTimeRemainingv2 = 1350.0f;
+	boostDirectionv2 = viewForward;
+	boostDirectionv2.Normalize();
+}
+void idPhysics_Player::BoosterFlyv2(float msec) {
+	boostTimeRemainingv2 -= msec;
+
+	if (boostTimeRemainingv2 <= 0.0f) {
+		boostActivev2 = false;
+		boostTimeRemainingv2 = 0.0f;
+
+		float speed = current.velocity.Length();
+		if (speed > walkSpeed && speed > 0.0f) {
+			current.velocity *= walkSpeed / speed;
+		}
+
+		gameLocal.Printf("Boost ended\n");
+		return;
+	}
+	boostDirectionv2 = viewForward;
+	boostDirectionv2.Normalize();
+	const float boostSpeed = 700.0f;
+
+	idPhysics_Player::Accelerate(
+		boostDirectionv2,
+		boostSpeed,
+		600.0f
+	);
+	idPhysics_Player::SlideMove(false, false, false, false);
+}
 /*
 ================
 idPhysics_Player::MovePlayer
@@ -1549,7 +1610,7 @@ void idPhysics_Player::MovePlayer( int msec ) {
 	frametime = framemsec * 0.001f;
 
 	// default speed
-	playerSpeed = walkSpeed;
+	playerSpeed = walkSpeed *2.0f;
 
 	// remove jumped and stepped up flag
 	current.movementFlags &= ~(PMF_JUMPED|PMF_STEPPED_UP|PMF_STEPPED_DOWN);
@@ -1587,13 +1648,22 @@ void idPhysics_Player::MovePlayer( int msec ) {
 // RAVEN END
 		return;
 	}
-	if (!boostActive && command.upmove < 0) if (boostActivationDelay <= 0) boostActivationDelay = 3200;
+	if (!boostActive && command.upmove < 0) if (boostActivationDelay <= 0) boostActivationDelay = 2100;
 
 	if (!boostActive && boostActivationDelay > 0) {
 		boostActivationDelay -= framemsec;
 		if (boostActivationDelay <= 0 && command.upmove < 0) {
 			boostActivationDelay = 0;
 			StartBoost();
+		}
+	}
+	if (!boostActivev2 && command.impulse == IMPULSE_1) if (boostActivationDelayv2 <= 0) boostActivationDelayv2 = 3200;
+
+	if (!boostActivev2 && boostActivationDelayv2 > 0) {
+		boostActivationDelayv2 -= framemsec;
+		if (boostActivationDelayv2 <= 0 && command.impulse == IMPULSE_1 ) {
+			boostActivationDelayv2 = 0;
+			StartBoostv2();
 		}
 	}
 	// special no clip mode
@@ -1644,6 +1714,9 @@ void idPhysics_Player::MovePlayer( int msec ) {
 	} 
 	else if ( boostActive ) {
 		idPhysics_Player::BoosterFly((float)framemsec);
+	}
+	else if (boostActivev2) {
+		idPhysics_Player::BoosterFlyv2((float)framemsec);
 	}
 	else if (current.movementFlags & PMF_TIME_FLY) {
 		walking = false;
@@ -1789,8 +1862,14 @@ idPhysics_Player::idPhysics_Player( void ) {
 	//#modded
 	boostTimeRemaining = 0.0f;
 	boostActive = false;
-	boostDirection = vec3_origin;
 	boostActivationDelay = 0;
+	boostTimeRemainingv2 = 0.0f;
+	boostActivev2 = false;
+	boostActivationDelayv2 = 0;
+	
+	boostDirection = vec3_origin;
+	boostDirectionv2 = vec3_origin;
+	
 }
 
 /*
@@ -2299,7 +2378,7 @@ const int	PLAYER_VELOCITY_TOTAL_BITS		= 16;
 const int	PLAYER_VELOCITY_EXPONENT_BITS	= idMath::BitsForInteger( idMath::BitsForFloat( PLAYER_VELOCITY_MAX ) ) + 1;
 const int	PLAYER_VELOCITY_MANTISSA_BITS	= PLAYER_VELOCITY_TOTAL_BITS - 1 - PLAYER_VELOCITY_EXPONENT_BITS;
 const int	PLAYER_MOVEMENT_TYPE_BITS		= 3;
-const int	PLAYER_MOVEMENT_FLAGS_BITS		= 8;
+const int	PLAYER_MOVEMENT_FLAGS_BITS		= 10;//mod added 2 to account for 2 movement flags hopfully less lag
 
 /*
 ================
