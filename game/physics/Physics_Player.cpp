@@ -18,6 +18,8 @@ const float PM_ACCELERATE_MP	= 15.0f;
 const float PM_AIRACCELERATE_MP	= 1.18f;
 const float PM_WATERACCELERATE	= 4.0f;
 const float PM_FLYACCELERATE	= 8.0f;
+const float PM_FLYBOOSTER		= 200.0f;
+const float PM_BOOSTERTIMEOFFSET= 1350.0f;
 
 const float PM_FRICTION			= 6.0f;
 const float PM_AIRFRICTION		= 0.0f;
@@ -44,6 +46,12 @@ const int PMF_TIME_WATERJUMP	= 128;		// movementTime is waterjump
 const int PMF_ALL_TIMES			= (PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK);
 
 int c_pmove = 0;
+
+//Modded
+float boostTimeRemaining;
+bool boostActive;
+idVec3 boostDirection;
+
 
 float idPhysics_Player::Pm_Accelerate( void ) {
 	return gameLocal.IsMultiplayer() ? PM_ACCELERATE_MP : PM_ACCELERATE_SP;
@@ -1440,6 +1448,87 @@ void idPhysics_Player::DropTimers( void ) {
 // RAVEN END	
 }
 
+void idPhysics_Player::StartBoost( void ) {
+	if ( boostActive != NULL && boostActive ) {
+		return;
+	}
+	boostActive = true;
+	boostTimeRemaining = 1350.0f;
+	boostDirection = viewForward;
+	boostDirection.Normalize();
+}
+
+void idPhysics_Player::BoosterFly(float msec) {
+	//idVec3	wishvel;
+	idVec3  wishdir;
+	//float	wishspeed;
+	//float	scale;
+	//	float boostTimeRemaining = 0.0f;
+	//	bool boostActive = FALSE;
+	//  idVec3 boostDirection = vec3_origin;
+	     boostTimeRemaining -= msec;
+
+	if (boostTimeRemaining <= 0.0f) {
+		boostActive = false;
+		boostTimeRemaining = 0.0f;
+
+		float speed = current.velocity.Length();
+		if (speed > walkSpeed && speed > 0.0f) {
+			current.velocity *= walkSpeed / speed;
+		}
+
+		gameLocal.Printf("Boost ended\n");
+		return;
+	}
+
+	wishdir = boostDirection;
+	wishdir.Normalize();
+
+	const float boostSpeed = 700.0f;
+
+	idPhysics_Player::Accelerate(
+		wishdir,
+		boostSpeed,
+		PM_FLYBOOSTER
+	);
+
+	// Move and handle collision.
+	idPhysics_Player::SlideMove(false, false, false, false);
+	//boostTimeRemaining -= msec;
+
+	//if (boostTimeRemaining <= 0.0f) {
+	//	boostActive = false;
+	//	boostTimeRemaining = 0.0f;
+
+	//	if (current.velocity.Length() > walkSpeed) {
+	//		current.velocity.Normalize();
+	//		current.velocity *= walkSpeed;
+	//	}
+
+	//	gameLocal.Printf("End of boost\n");
+	//	return;
+	//}
+
+	//idPhysics_Player::Friction();
+
+	//float scale = idPhysics_Player::CmdScale(command);
+
+	//idVec3 wishvel = vec3_origin;
+
+	//if (scale) {
+	//	wishvel = scale *
+	//		(boostDirection + viewRight * command.rightmove);
+	//}
+
+	//idVec3 wishdir = wishvel;
+	//float wishspeed = wishdir.Normalize();
+
+	//idPhysics_Player::Accelerate(
+	//	wishdir, wishspeed, PM_FLYBOOSTER
+	//);
+
+	//idPhysics_Player::SlideMove(false, false, false, false);
+}
 /*
 ================
 idPhysics_Player::MovePlayer
@@ -1498,7 +1587,9 @@ void idPhysics_Player::MovePlayer( int msec ) {
 // RAVEN END
 		return;
 	}
-
+	if ( !boostActive && command.upmove < 0 ) {
+		StartBoost();
+	}
 	// special no clip mode
 	if ( current.movementType == PM_NOCLIP ) {
 		idPhysics_Player::NoclipMove();
@@ -1541,11 +1632,12 @@ void idPhysics_Player::MovePlayer( int msec ) {
 
 	// handle timers
 	idPhysics_Player::DropTimers();
-
-	// move
 	if ( current.movementType == PM_DEAD ) {
 		// dead
 		idPhysics_Player::DeadMove();
+	} 
+	else if ( boostActive ) {
+		idPhysics_Player::BoosterFly((float)framemsec);
 	}
 	else if ( ladder ) {
 		// going up or down a ladder
@@ -1682,6 +1774,10 @@ idPhysics_Player::idPhysics_Player( void ) {
 	ladderNormal.Zero();
 	waterLevel = WATERLEVEL_NONE;
 	waterType = 0;
+	//#modded
+	boostTimeRemaining = 0.0f;
+	boostActive = false;
+	boostDirection = vec3_origin;
 }
 
 /*
@@ -1816,8 +1912,10 @@ idPhysics_Player::SetSpeed
 ================
 */
 void idPhysics_Player::SetSpeed( const float newWalkSpeed, const float newCrouchSpeed ) {
+	//Old Crounching branch
 	walkSpeed = newWalkSpeed;
 	crouchSpeed = newCrouchSpeed;
+	//Sprting/Boost branch
 }
 
 /*

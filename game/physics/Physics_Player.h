@@ -181,7 +181,12 @@ private:
 	bool					CheckWaterJump( void );
 	void					SetWaterLevel( void );
 	void					DropTimers( void );
+//Moded Boostermovement
+	void					StartBoost( void );
+	void					BoosterFly( float msec );
+//regular
 	void					MovePlayer( int msec );
+
 
 	float					Pm_Accelerate( void );
 	float					Pm_AirAccelerate( void );
