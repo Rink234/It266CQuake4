@@ -43,14 +43,18 @@ const int PMF_JUMP_HELD			= 16;		// set when jump button is held down
 const int PMF_TIME_LAND			= 32;		// movementTime is time before rejump
 const int PMF_TIME_KNOCKBACK	= 64;		// movementTime is an air-accelerate only time
 const int PMF_TIME_WATERJUMP	= 128;		// movementTime is waterjump
-const int PMF_ALL_TIMES			= (PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK);
+//const int PMF_ALL_TIMES			= (PMF_TIME_WATERJUMP|PMF_TIME_LAND|PMF_TIME_KNOCKBACK); gets overiden
 
 int c_pmove = 0;
 
 //Modded
+const int PM_FLYTIME_MS = 7000;
+const int PMF_TIME_FLY = 256;	
+const int PMF_ALL_TIMES = (PMF_TIME_WATERJUMP | PMF_TIME_LAND | PMF_TIME_KNOCKBACK | PMF_TIME_FLY);
 float boostTimeRemaining;
 bool boostActive;
 idVec3 boostDirection;
+int boostActivationDelay;
 
 
 float idPhysics_Player::Pm_Accelerate( void ) {
@@ -480,7 +484,7 @@ void idPhysics_Player::Friction( void ) {
 // nmckenzie: allow trying custom frictions
 	if ( pm_frictionoverride.GetFloat() > -1 ) {
 		drop += speed * pm_frictionoverride.GetFloat() * frametime;
-	} else if ( current.movementType == PM_SPECTATOR ) {
+	}	else if (current.movementType == PM_SPECTATOR || (current.movementFlags & PMF_TIME_FLY)) {
 // RAVEN END
 		drop += speed * PM_FLYFRICTION * frametime;
 	}
@@ -707,13 +711,8 @@ void idPhysics_Player::WalkMove( void ) {
 	}
 
 	if ( idPhysics_Player::CheckJump() ) {
-		// jumped away
-		if ( waterLevel > WATERLEVEL_FEET ) {
-			idPhysics_Player::WaterMove();
-		}
-		else {
-			idPhysics_Player::AirMove();
-		}
+		// ModdedcopOUt
+		idPhysics_Player::FlyMove();	
 		return;
 	}
 
@@ -1118,7 +1117,7 @@ void idPhysics_Player::CheckGround( bool checkStuck ) {
 	}
 
 	// if the player didn't have ground contacts the previous frame
-	if ( !hadGroundContacts ) {
+	if ( !hadGroundContacts && !( current.movementFlags & PMF_TIME_FLY) ) {
 		// don't do landing time if we were just going down a slope
 		if ( (current.velocity * -gravityNormal) < -200.0f ) {
 			// don't allow another jump for a little while
@@ -1281,6 +1280,8 @@ idPhysics_Player::CheckJump
 */
 bool idPhysics_Player::CheckJump( void ) {
 	idVec3 addVelocity;
+	
+	assert(groundPlane);
 
 	if ( command.upmove < 10 ) {
 		// not holding jump
@@ -1296,19 +1297,18 @@ bool idPhysics_Player::CheckJump( void ) {
 	if ( current.movementFlags & PMF_DUCKED ) {
 		return false;
 	}
+	if (current.velocity * groundTrace.c.normal < 0.0f) {
+		current.velocity.ProjectOntoPlane(groundTrace.c.normal, OVERCLIP);
+	}
 
-	groundPlane = false;		// jumping away
+	current.movementFlags |= PMF_TIME_FLY | PMF_JUMP_HELD | PMF_JUMPED;
+	current.movementTime = PM_FLYTIME_MS;
+	groundPlane = false;
 	walking = false;
-	current.movementFlags |= PMF_JUMP_HELD | PMF_JUMPED;
+	groundEntityPtr = NULL;
 
-	addVelocity = 2.0f * maxJumpHeight * -gravityVector;
-	addVelocity *= idMath::Sqrt( addVelocity.Normalize() );
-	current.velocity += addVelocity;
-
-// RAVEN BEGIN
-// bdube: crouch slide, nick maggoire is awesome
+	// crouch slide
 	current.crouchSlideTime = 0;
-// RAVEN END
 
 	return true;
 }
@@ -1466,6 +1466,8 @@ void idPhysics_Player::BoosterFly(float msec) {
 	//	float boostTimeRemaining = 0.0f;
 	//	bool boostActive = FALSE;
 	//  idVec3 boostDirection = vec3_origin;
+
+	//EDIT I HAVE NO IDEA WHY SUBTRACTING WORKS SO WEll BUT I HATES ADDITION WITH A FERVER
 	     boostTimeRemaining -= msec;
 
 	if (boostTimeRemaining <= 0.0f) {
@@ -1473,9 +1475,7 @@ void idPhysics_Player::BoosterFly(float msec) {
 		boostTimeRemaining = 0.0f;
 
 		float speed = current.velocity.Length();
-		if (speed > walkSpeed && speed > 0.0f) {
-			current.velocity *= walkSpeed / speed;
-		}
+		current.velocity *= walkSpeed / speed;
 
 		gameLocal.Printf("Boost ended\n");
 		return;
@@ -1587,8 +1587,14 @@ void idPhysics_Player::MovePlayer( int msec ) {
 // RAVEN END
 		return;
 	}
-	if ( !boostActive && command.upmove < 0 ) {
-		StartBoost();
+	if (!boostActive && command.upmove < 0) if (boostActivationDelay <= 0) boostActivationDelay = 3200;
+
+	if (!boostActive && boostActivationDelay > 0) {
+		boostActivationDelay -= framemsec;
+		if (boostActivationDelay <= 0 && command.upmove < 0) {
+			boostActivationDelay = 0;
+			StartBoost();
+		}
 	}
 	// special no clip mode
 	if ( current.movementType == PM_NOCLIP ) {
@@ -1638,6 +1644,12 @@ void idPhysics_Player::MovePlayer( int msec ) {
 	} 
 	else if ( boostActive ) {
 		idPhysics_Player::BoosterFly((float)framemsec);
+	}
+	else if (current.movementFlags & PMF_TIME_FLY) {
+		walking = false;
+		groundPlane = false;
+		ladder = false;
+		idPhysics_Player::FlyMove();
 	}
 	else if ( ladder ) {
 		// going up or down a ladder
@@ -1778,6 +1790,7 @@ idPhysics_Player::idPhysics_Player( void ) {
 	boostTimeRemaining = 0.0f;
 	boostActive = false;
 	boostDirection = vec3_origin;
+	boostActivationDelay = 0;
 }
 
 /*
